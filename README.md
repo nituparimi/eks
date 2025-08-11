@@ -1,4 +1,4 @@
-#K8s manifest files
+# K8s manifest files
 
 mongo-config.yaml
 
@@ -9,7 +9,7 @@ mongo.yaml
 webapp.yaml
 
 
-#K8s commands
+# K8s commands
 
 start Minikube and check status
 
@@ -19,13 +19,13 @@ minikube status
 
 
 
-#get minikube node's ip address
+# get minikube node's ip address
 
 minikube ip
 
 
 
-#get basic info about k8s components
+# get basic info about k8s components
 
 kubectl get node
 
@@ -37,7 +37,7 @@ kubectl get all
 
 
 
-#get extended info about components
+# get extended info about components
 
 kubectl get pod -o wide
 
@@ -45,7 +45,7 @@ kubectl get node -o wide
 
 
 
-#get detailed info about a specific component
+# get detailed info about a specific component
 
 kubectl describe svc {svc-name}
 
@@ -59,7 +59,7 @@ kubectl logs {pod-name}
 
 
 
-#stop your Minikube cluster
+stop your Minikube cluster
 
 minikube stop
 
@@ -75,7 +75,7 @@ minikube service webapp-service
 
 
 
-#Links
+# Links
 
 mongodb image on Docker Hub: https://hub.docker.com/_/mongo
 
