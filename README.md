@@ -1,3 +1,7 @@
+# application deployment on EKS through Github actions
+
+<img width="747" height="599" alt="image" src="https://github.com/user-attachments/assets/55c040ad-d437-4656-b834-cead3abf7008" />
+
 # K8s manifest files
 
 mongo-config.yaml
