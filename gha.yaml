@@ -1,0 +1,392 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This CloudFormation template manages the Networking / CI-CD infrastructure for the github-actions-demo blog
+Parameters:
+  ClusterName:
+    Type: String
+    Description: The name of the cluster to be created
+  RepositoryToken:
+    Type: String
+    Description: The token for the github repo
+    NoEcho: true
+Resources:
+  CodeCommitRepository:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: github-actions-code-repository
+      RepositoryDescription: github-actions-demo code repository
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: github-actions-image-repository
+  CodePipelineKMSKey:
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS Key for Encrypting CodePipeline Artifacts
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: key-default-1
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: '*'
+  CodePipelineArtifactStoreBucket:
+    Type: AWS::S3::Bucket
+    Metadata:
+      guard:
+        SuppressedRules:
+          - S3_BUCKET_LOGGING_ENABLED
+    Properties:
+      VersioningConfiguration:
+           Status: Enabled
+      PublicAccessBlockConfiguration:
+           BlockPublicAcls: true
+           BlockPublicPolicy: true
+           IgnorePublicAcls: true
+           RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref CodePipelineKMSKey
+  CodePipelineArtifactStoreBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CodePipelineArtifactStoreBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: DenyUnEncryptedObjectUploads
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Sub ${CodePipelineArtifactStoreBucket.Arn}/*
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
+          - Sid: DenyInsecureConnections
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource: !Sub ${CodePipelineArtifactStoreBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+  CodePipelineServiceRole:
+    Metadata:
+      guard:
+        SuppressedRules:
+          - IAM_NO_INLINE_POLICY_CHECK
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: AWS-CodePipeline-Service
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codecommit:CancelUploadArchive
+                  - codecommit:GetBranch
+                  - codecommit:GetCommit
+                  - codecommit:GetUploadArchiveStatus
+                  - codecommit:UploadArchive
+                Resource: !GetAtt CodeCommitRepository.Arn
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource: 
+                  - !GetAtt CodeBuildBuildAndTestProject.Arn
+                  - !GetAtt CodeBuildDeployProject.Arn
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketAcl
+                  - s3:GetBucketLocation
+                Resource:
+                  - !Sub ${CodePipelineArtifactStoreBucket.Arn}
+                  - !Sub ${CodePipelineArtifactStoreBucket.Arn}/*
+              - Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource:
+                  - !GetAtt CodePipelineKMSKey.Arn
+  CodeBuildServiceRole:
+    Metadata:
+      guard:
+        SuppressedRules:
+          - IAM_NO_INLINE_POLICY_CHECK
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: AWS-CodeBuild-Service
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Resource:
+                  - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/github-actions-demo*
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+              - Sid: S3AccessPolicy
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:List*
+                  - s3:PutObject
+                Resource:
+                  - !Sub ${CodePipelineArtifactStoreBucket.Arn}*
+              - Sid: S3BucketIdentity
+                Effect: Allow
+                Action:
+                  - s3:GetBucketAcl
+                  - s3:GetBucketLocation
+                Resource:
+                  - !Sub ${CodePipelineArtifactStoreBucket.Arn}*
+              - Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource:
+                  - !GetAtt CodePipelineKMSKey.Arn
+              - Sid: ECRPullPolicy
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                Resource: !GetAtt ECRRepository.Arn
+              - Sid: ECRAuthPolicy
+                Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: EKSClusterAccess
+                Effect: Allow
+                Action:
+                  - eks:DescribeCluster
+                Resource: !Sub arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/github-actions-demo
+  CodeBuildSourceCredentials:
+    Type: AWS::CodeBuild::SourceCredential
+    Properties:
+      AuthType: PERSONAL_ACCESS_TOKEN
+      ServerType: GITHUB
+      Token: !Ref RepositoryToken
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: github-actions-demo-pipeline
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref CodePipelineArtifactStoreBucket
+        EncryptionKey:
+          Id: !GetAtt CodePipelineKMSKey.Arn
+          Type: KMS
+      Stages:
+        - Actions:
+            - ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeCommit
+                Version: '1'
+              Configuration:
+                BranchName: main
+                RepositoryName: !GetAtt CodeCommitRepository.Name
+                PollForSourceChanges: false
+                OutputArtifactFormat: CODE_ZIP
+              InputArtifacts: []
+              Name: Source
+              Namespace: SourceVariables
+              OutputArtifacts:
+                - Name: SourceArtifact
+              Region: !Ref AWS::Region
+              RunOrder: 1
+          Name: Source
+        - Actions:
+            - ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref CodeBuildBuildAndTestProject
+                EnvironmentVariables: !Sub '[{"name":"IMAGE_REPO","value":"${ECRRepository.RepositoryUri}","type":"PLAINTEXT"}]'
+              InputArtifacts:
+                - Name: SourceArtifact
+              Name: Build
+              Namespace: BuildVariables
+              OutputArtifacts:
+                - Name: BuildArtifact
+              Region: !Ref AWS::Region
+              RunOrder: 1
+          Name: Build
+        - Actions:
+            - ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Provider: Manual
+                Version: '1'
+              Configuration:
+                CustomData: Approve to Deploy
+              Name: Approval
+              Region: !Ref AWS::Region
+              RunOrder: 1
+          Name: Approval
+        - Actions:
+            - ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref CodeBuildDeployProject
+                EnvironmentVariables: '[{"name":"IMAGE_REPO","value":"#{BuildVariables.IMAGE_REPO}","type":"PLAINTEXT"},{"name":"IMAGE_TAG","value":"#{BuildVariables.IMAGE_TAG}","type":"PLAINTEXT"}]'
+              InputArtifacts:
+                - Name: SourceArtifact
+              Name: Build
+              Namespace: DeployVariables
+              OutputArtifacts:
+                - Name: DeployArtifact
+              Region: !Ref AWS::Region
+              RunOrder: 1
+          Name: Deploy
+  CodePipelineTrigger:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: github-actions-demo - CodePipeline Trigger
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - CodeCommit Repository State Change
+        resources:
+          - !GetAtt CodeCommitRepository.Arn
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceType:
+            - branch
+          referenceName:
+            - main
+      State: ENABLED
+      Targets:
+        - Arn: !Sub arn:${AWS::Partition}:codepipeline:${AWS::Region}:${AWS::AccountId}:github-actions-demo-pipeline
+          RoleArn: !GetAtt CodePipelineEventsRole.Arn
+          Id: github-actions-demo-pipeline
+  CodePipelineEventsRole:
+    Metadata:
+      guard:
+        SuppressedRules:
+          - IAM_NO_INLINE_POLICY_CHECK
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: AWS-CodePipeline-Events
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codepipeline:StartPipelineExecution
+                Resource:
+                  - !Sub arn:${AWS::Partition}:codepipeline:${AWS::Region}:${AWS::AccountId}:github-actions-demo-pipeline
+  CodeBuildBuildAndTestProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: github-actions-demo-build
+      Description: github-actions-demo - CodeBuild Build Project
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: true
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspec-build.yml
+      TimeoutInMinutes: 60
+  CodeBuildDeployProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: github-actions-demo-deploy
+      Description: github-actions-demo - CodeBuild Deploy Project
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: false
+        EnvironmentVariables:
+          - Name: CLUSTER_NAME
+            Value: !Ref ClusterName
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspec-deploy.yml
+      TimeoutInMinutes: 60
+Outputs:
+  CodeCommitCloneUrl:
+    Value: !GetAtt CodeCommitRepository.CloneUrlHttp
+    Description: CodeCommit Clone URL
+  CodeBuildServiceRole:
+    Value: !GetAtt CodeBuildServiceRole.Arn
+    Description: IAM Role for CodeBuild
+  ECRRepositoryUri:
+    Value: !GetAtt ECRRepository.RepositoryUri
