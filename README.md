@@ -13,9 +13,10 @@
 5.An Approval Stage is included in the pipeline, which allows the developer to manually review and approve the build artifacts before they are deployed.
 
 6.After receiving approval, AWS CodePipeline advances to the Deploy Stage, where GitHub Actions are used to run helm deployment commands.
-Within this Deploy Stage, AWS CodeBuild uses GitHub Actions to install the Helm application on Amazon Elastic Kubernetes Service (EKS), leveraging Helm charts for deployment.
 
-7.The deployed application is now running on Amazon EKS and is accessible via the automatically provisioned Application Load Balancer.
+7.Within this Deploy Stage, AWS CodeBuild uses GitHub Actions to install the Helm application on Amazon Elastic Kubernetes Service (EKS), leveraging Helm charts for deployment.
+
+8.The deployed application is now running on Amazon EKS and is accessible via the automatically provisioned Application Load Balancer.
 
 
 # K8s manifest files
