@@ -1,4 +1,4 @@
-# Application deployment on EKS through Github actions
+# I Application deployment on EKS through Github actions
 
 <img width="747" height="599" alt="image" src="https://github.com/user-attachments/assets/55c040ad-d437-4656-b834-cead3abf7008" />
 
@@ -19,7 +19,7 @@
 8.The deployed application is now running on Amazon EKS and is accessible via the automatically provisioned Application Load Balancer.
 
 
-# K8s manifest files
+# II Deployment on minikube K8s manifest files
 
 mongo-config.yaml
 
