@@ -75,19 +75,26 @@ Next, you will create a simple python flask application and the associated helm 
 
 Configure your git client to use the AWS CLI CodeCommit credential helper. For UNIX based systems follow instructions here, and for Windows based systems follow instructions here.
 Retrieve the repository HTTPS clone URL using the command below:
+Bash
+
 export CODECOMMIT_CLONE_URL=$(aws cloudformation describe-stacks \
 --stack-name github-actions-demo-base \
 --query "Stacks[0].Outputs[?OutputKey=='CodeCommitCloneUrl'].OutputValue" \
 --region $AWS_REGION \
 --output text)
-Bash
+
 Clone and navigate to your repository:
-git clone $CODECOMMIT_CLONE_URL github-actions-demo && cd github-actions-demo
+
 Bash
+
+git clone $CODECOMMIT_CLONE_URL github-actions-demo && cd github-actions-demo
+
 Create the Application
 Now that you’ve set up all the required resources, you can begin building your application and its necessary deployment manifests.
 
 Create the app.py file, which serves as the hello world application using the command below:
+Bash
+
 cat << EOF >app.py
 from flask import Flask
 app = Flask(__name__)
@@ -99,8 +106,10 @@ def demoapp():
 if __name__ == '__main__':
   app.run(port=8080,host='0.0.0.0')
 EOF
-Bash
+
 Create a Dockerfile in the same directory as the application using the command below:
+Bash
+
 cat << EOF > Dockerfile
 FROM public.ecr.aws/docker/library/python:alpine3.18 
 WORKDIR /app 
@@ -109,15 +118,20 @@ RUN apk update && apk upgrade --no-cache
 COPY app.py . 
 CMD [ "python3", "app.py" ]
 EOF
-Bash
+
 Initialize the HELM application
+Bash
+
 helm create demo-app
 rm -rf demo-app/templates/*
-Bash
+
 Create the manifest files required for the deployment accordingly:
 deployment.yaml – Contains the blueprint for deploying instances of the application. It includes the desired state and pod template which has the pod specifications like the container image to be used, ports etc.
+Bash
+
 cat <<EOF > demo-app/templates/deployment.yaml
 ---
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -140,10 +154,12 @@ spec:
         ports:
         - containerPort: 8080
 EOF
-Bash
+
 service.yaml – Describes the service object in Kubernetes and specifies how to access the set of pods running the application. It acts as an internal load balancer to route traffic to pods based on the defined service type (like ClusterIP, NodePort, or LoadBalancer).
 cat <<EOF > demo-app/templates/service.yaml
 ---
+Bash
+
 apiVersion: v1
 kind: Service
 metadata:
@@ -158,8 +174,10 @@ spec:
   selector:
     app.kubernetes.io/name: {{ .Release.Name }}
 EOF
-Bash
+
 ingress.yaml – Defines the ingress rules for accessing the application from outside the Kubernetes cluster. This file maps HTTP and HTTPS routes to services within the cluster, allowing external traffic to reach the correct services.
+Bash
+
 cat <<EOF > demo-app/templates/ingress.yaml
 ---
 apiVersion: networking.k8s.io/v1
@@ -183,8 +201,9 @@ spec:
               port:
                 number: 8080
 EOF
-Bash
 values.yaml – This file provides the default configuration values for the Helm chart. This file is crucial for customizing the chart to fit different environments or deployment scenarios. The manifest below assumes that the default namespace is configured as the namespace selector for your Fargate profile.
+Bash
+
 cat <<EOF > demo-app/values.yaml
 ---
 namespace: default
@@ -195,7 +214,7 @@ service:
   type: NodePort
   port: 8080
 EOF
-Bash
+
 Overview of the CI/CD Pipeline
 A typical CI/CD pipeline consists of source, build, test, approval, and deploy stages.
 In this post, AWS CodeBuild is used in the build and deploy states. AWS CodeBuild utilizes specification files called buildspec.
@@ -212,6 +231,8 @@ Here, you will create a file called buildspec-build.yml at the root of the repos
 
 aws-actions/configure-aws-credentials: Accessing AWS APIs requires the action to be authenticated using AWS credentials. By default, the permissions granted to the CodeBuild service role can be used to sign API actions executed during a build. However, when using a GitHub action in CodeBuild, the credentials from the CodeBuild service role need to be made available to subsequent actions (e.g., to log in to ECR, push the image). This action allows leveraging the CodeBuild service role credentials for subsequent actions.
 aws-actions/amazon-ecr-login: Logs into the ECR registry using the credentials from the previous step.
+
+Bash
 version: 0.2
 env:
   exported-variables:
@@ -243,7 +264,7 @@ phases:
           echo "Pushing image to $REPOSITORY_URI"
           docker push $IMAGE_REPO:latest
           docker push $IMAGE_REPO:$IMAGE_TAG
-Bash
+
 In the buildspec above the variables IMAGE_REPO and IMAGE_TAG are set as exported-variables that will be used in the subsequent deploy stage.
 
 Build Specification (Deploy Stage)
@@ -251,6 +272,7 @@ During the deploy stage, you will utilize AWS CodeBuild to deploy the helm manif
 
 Create a file called buildspec-deploy.yml at the root of the repository as such:
 
+Bash
 version: 0.2
 env:
   exported-variables:
@@ -284,7 +306,7 @@ phases:
       - name: "Fetch Application URL"
         run: |
           while :;do url=$(kubectl get ingress/demo-app-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' -n default);[ -z "$url" ]&&{ echo "URL is empty, retrying in 5 seconds...";sleep 5;}||{ export APP_URL="$url";echo "APP_URL set to: $APP_URL";break;};done;echo "APP_URL=$APP_URL">>$GITHUB_ENV 
-Bash
+
 At this point your application structure should have the following structure:
 
 ├── Dockerfile
@@ -301,9 +323,10 @@ At this point your application structure should have the following structure:
 └── values.yaml
 Now check these files in to the remote repository by running the below commands
 
+Bash
 git add -A && git commit -m "Initial Commit"
 git push --set-upstream origin main
-Bash
+
 Now, let’s verify the deployment of our application using the load balancer URL. Navigate to the CodePipeline console. The pipeline incorporates a manual approval stage and requires a pipeline operator to review and approve the release to deploy the application. Following this, the URL for the deployed application can be conveniently retrieved from the outputs of the pipeline execution.
 
 Viewing the application
@@ -329,12 +352,16 @@ Clean up
 To avoid incurring future charges, you should clean up the resources that you created:
 
 Delete the application by executing helm, this will remove the ALB that was provisioned
-helm uninstall demo-app
+
 Bash
+helm uninstall demo-app
+
 Delete the CloudFormation stack (github-actions-demo-base) by executing the below command
+
+Bash
 aws cloudformation delete-stack \
         --stack-name github-actions-demo-base \
         -–region $AWS_REGION
-Bash
+
 Conclusion
 In this walkthrough, you have learned how to leverage the powerful combination of GitHub Actions and AWS CodeBuild to simplify and automate the deployment of a Python application on Amazon EKS. This approach not only streamlines your deployment process but also ensures that your application is built and deployed securely. You can extend this pipeline by incorporating additional stages such as testing and security scanning, depending on your project’s needs. Additionally, this solution can be used for other programming languages.
