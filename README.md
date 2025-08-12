@@ -106,3 +106,5 @@ k8s official documentation: https://kubernetes.io/docs/home/
 webapp code repo: https://gitlab.com/nanuchi/developing-with-docker/-/tree/feature/k8s-in-hour
 
 https://aws.amazon.com/blogs/devops/simplify-amazon-eks-deployments-with-github-actions-and-aws-codebuild/
+
+2021 AB3 CI/CD demo used: https://github.com/aws-samples/aws-kube-code-service
